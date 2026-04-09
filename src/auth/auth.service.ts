@@ -1,23 +1,34 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { UsersService } from 'src/users/users.service';
-import { RegisterDto } from './dto/register.dto';
 import * as bcrypt from 'bcrypt';
+import { User } from '../users/entities/user.entity';
+import { UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
-import { User } from 'src/users/entities/user.entity';
+import { RegisterDto } from './dto/register.dto';
+import {
+  AuthResponseUser,
+  AuthTokensResult,
+  AuthenticatedUser,
+} from './auth.types';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
   ) {}
 
   //Rgister a new user
-  async register(registerDto: RegisterDto) {
+  async register(registerDto: RegisterDto): Promise<AuthTokensResult> {
     const existingUser = await this.usersService.findByEmail(registerDto.email);
     if (existingUser) {
-      throw new Error('User with this email already exists');
+      throw new ConflictException('Email already exists');
     }
 
     const hashedPassword = await bcrypt.hash(registerDto.password, 10);
@@ -28,14 +39,14 @@ export class AuthService {
       password: hashedPassword,
     });
 
-    return this.buildAuthResponse(user);
+    return this.generateTokensAndStoreRefreshToken(user);
   }
 
   //Login user
-  async login(loginDto: LoginDto) {
-    const user = await this.usersService.findByEmail(loginDto.email);
+  async login(loginDto: LoginDto): Promise<AuthTokensResult> {
+    const user = await this.usersService.findByEmail(loginDto.email, true);
     if (!user) {
-      throw new Error('Invalid credentials');
+      throw new UnauthorizedException('Invalid email or password');
     }
 
     const isPasswordValid = await bcrypt.compare(
@@ -43,42 +54,110 @@ export class AuthService {
       user.password,
     );
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Invalid email or password');
     }
 
-    return this.buildAuthResponse(user);
+    return this.generateTokensAndStoreRefreshToken(user);
+  }
+
+  async refreshTokens(
+    userId: string,
+    refreshToken: string,
+  ): Promise<AuthTokensResult> {
+    const user = await this.usersService.findByIdWithSensitiveFields(userId);
+
+    if (!user || !user.hashedRefreshToken) {
+      throw new UnauthorizedException('Access denied');
+    }
+
+    const refreshTokenMatches = await bcrypt.compare(
+      refreshToken,
+      user.hashedRefreshToken,
+    );
+
+    if (!refreshTokenMatches) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
+
+    return this.generateTokensAndStoreRefreshToken(user);
+  }
+  //Logout Method
+  async logout(userId: string) {
+    await this.usersService.updateHashedRefreshToken(userId, null);
+    return { message: 'Logged out successfully' };
   }
 
   //validate user by Id
-  async validateUserById(userId: string): Promise<User | null> {
-    return this.usersService.findById(userId);
+  async validateUserById(userId: string): Promise<AuthenticatedUser | null> {
+    const user = await this.usersService.findById(userId);
+    return user ? this.toAuthenticatedUser(user) : null;
+  }
+  //Generate Access and Refresh Tokens
+  private async generateTokens(user: User) {
+    const accessSecret = this.configService.getOrThrow<string>('JWT_SECRET');
+    const accessExpiresIn =
+      this.configService.getOrThrow<string>('JWT_EXPIRES_IN');
+    const refreshSecret =
+      this.configService.getOrThrow<string>('JWT_REFRESH_SECRET');
+    const refreshExpiresIn = this.configService.getOrThrow<string>(
+      'JWT_REFRESH_EXPIRES_IN',
+    );
+
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    };
+
+    const accessToken = await this.jwtService.signAsync(payload, {
+      secret: accessSecret,
+      expiresIn: accessExpiresIn as any,
+    });
+
+    const refreshToken = await this.jwtService.signAsync(payload, {
+      secret: refreshSecret,
+      expiresIn: refreshExpiresIn as any,
+    });
+
+    return {
+      accessToken,
+      refreshToken,
+    };
   }
 
-    //build auth response with JWT token
-    private async buildAuthResponse(user:User){
-        const payload = {
-            sub :user.id,
-            email: user.email,
-            name: user.name,
-        };
+  private async generateTokensAndStoreRefreshToken(
+    user: User,
+  ): Promise<AuthTokensResult> {
+    const { accessToken, refreshToken } = await this.generateTokens(user);
 
-        const accessToken = await this.jwtService.signAsync(payload);
+    const hashedRefreshToken = await bcrypt.hash(refreshToken, 10);
 
-        return {
-            message: 'message',
-            access_token: accessToken,
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                role: user.role,
-                isActive: user.isActive,
-                isEmailVerified: user.isEmailVerified,
-                createdAt: user.createdAt,
-                updatedAt: user.updatedAt,
-            }
-        }
+    await this.usersService.updateHashedRefreshToken(
+      user.id,
+      hashedRefreshToken,
+    );
+    return {
+      accessToken,
+      refreshToken,
+      user: this.toAuthResponseUser(user),
+    };
+  }
 
+  private toAuthenticatedUser(user: User): AuthenticatedUser {
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      isActive: user.isActive,
+    };
+  }
 
-    }
+  private toAuthResponseUser(user: User): AuthResponseUser {
+    return {
+      ...this.toAuthenticatedUser(user),
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
+  }
 }
