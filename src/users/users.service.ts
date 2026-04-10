@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { User } from './entities/user.entity';
+import {
+  OtpPurpose,
+  RegistrationStatus,
+  User,
+} from './entities/user.entity';
 
 @Injectable()
 export class UsersService {
@@ -15,26 +19,8 @@ export class UsersService {
     return this.userRepository.save(newUser);
   }
 
-  async findByEmail(
-    email: string,
-    includePassword = false,
-  ): Promise<User | null> {
-    return this.userRepository.findOne({
-      where: { email },
-      select: includePassword
-        ? {
-            id: true,
-            name: true,
-            email: true,
-            password: true,
-            role: true,
-            isActive: true,
-            hashedRefreshToken: true,
-            createdAt: true,
-            updatedAt: true,
-          }
-        : undefined,
-    });
+  async findByEmail(email: string): Promise<User | null> {
+    return this.userRepository.findOne({ where: { email } });
   }
 
   async findById(id: string): Promise<User | null> {
@@ -42,15 +28,37 @@ export class UsersService {
   }
 
   async findByIdWithSensitiveFields(id: string): Promise<User | null> {
+    return this.findOneWithSensitiveFields({ id });
+  }
+
+  async findByEmailWithSensitiveFields(email: string): Promise<User | null> {
+    return this.findOneWithSensitiveFields({ email });
+  }
+
+  private async findOneWithSensitiveFields(
+    where: Partial<Pick<User, 'id' | 'email'>>,
+  ): Promise<User | null> {
     return this.userRepository.findOne({
-      where: { id },
+      where,
       select: {
         id: true,
         name: true,
         email: true,
-        password: true,
+        pinHash: true,
         role: true,
         isActive: true,
+        isPinSet: true,
+        isOtpVerified: true,
+        registrationStatus: true,
+        otpCodeHash: true,
+        otpPurpose: true,
+        otpExpiresAt: true,
+        otpVerifiedAt: true,
+        otpLastSentAt: true,
+        registrationExpiresAt: true,
+        otpAttempts: true,
+        failedLoginAttempts: true,
+        lockedUntil: true,
         hashedRefreshToken: true,
         createdAt: true,
         updatedAt: true,
@@ -63,5 +71,48 @@ export class UsersService {
     hashedRefreshToken: string | null,
   ): Promise<void> {
     await this.userRepository.update(userId, { hashedRefreshToken });
+  }
+
+  async updateOtpData(
+    userId: string,
+    data: {
+      otpCodeHash?: string | null;
+      otpPurpose?: OtpPurpose | null;
+      otpExpiresAt?: Date | null;
+      otpVerifiedAt?: Date | null;
+      otpLastSentAt?: Date | null;
+      otpAttempts?: number;
+      isOtpVerified?: boolean;
+      registrationStatus?: RegistrationStatus;
+      registrationExpiresAt?: Date | null;
+    },
+  ): Promise<void> {
+    await this.userRepository.update(userId, data);
+  }
+
+  async updatePin(userId: string, pinHash: string): Promise<void> {
+    await this.userRepository.update(userId, {
+      pinHash,
+      isPinSet: true,
+      isOtpVerified: false,
+      registrationStatus: RegistrationStatus.COMPLETED,
+      otpCodeHash: null,
+      otpPurpose: null,
+      otpExpiresAt: null,
+      otpVerifiedAt: null,
+      otpLastSentAt: null,
+      otpAttempts: 0,
+      registrationExpiresAt: null,
+    });
+  }
+
+  async updateLoginSecurity(
+    userId: string,
+    data: {
+      failedLoginAttempts?: number;
+      lockedUntil?: Date | null;
+    },
+  ): Promise<void> {
+    await this.userRepository.update(userId, data);
   }
 }

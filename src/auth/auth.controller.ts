@@ -8,8 +8,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Response } from 'express';
+import { ForgotPinDto } from './dto/forgot-pin.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPinDto } from './dto/reset-pin.dto';
+import { SendOtpDto } from './dto/send-otp.dto';
+import { SetPinDto } from './dto/set-pin.dto';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtRefreshGuard } from './jwt-refresh.guard';
 import { AuthService } from './auth.service';
@@ -83,13 +88,31 @@ export class AuthController {
   @Post('register')
   async register(
     @Body() registerDto: RegisterDto,
-    @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.authService.register(registerDto);
+    return result;
+  }
+
+  @Post('send-otp')
+  sendOtp(@Body() dto: SendOtpDto) {
+    return this.authService.sendOtp(dto);
+  }
+
+  @Post('verify-otp')
+  verifyOtp(@Body() dto: VerifyOtpDto) {
+    return this.authService.verifyOtp(dto);
+  }
+
+  @Post('set-pin')
+  async setPin(
+    @Body() dto: SetPinDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.setPin(dto);
     this.setAuthCookies(res, result);
 
     return {
-      message: 'Register successful',
+      message: 'PIN set successfully',
       user: result.user,
     };
   }
@@ -106,6 +129,16 @@ export class AuthController {
       message: 'Login successful',
       user: result.user,
     };
+  }
+
+  @Post('forgot-pin')
+  forgotPin(@Body() dto: ForgotPinDto) {
+    return this.authService.forgotPin(dto);
+  }
+
+  @Post('reset-pin')
+  resetPin(@Body() dto: ResetPinDto) {
+    return this.authService.resetPin(dto);
   }
 
   @UseGuards(JwtAuthGuard)

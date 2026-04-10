@@ -1,4 +1,7 @@
-import { UserRole } from '../users/entities/user.entity';
+import {
+  RegistrationStatus,
+  UserRole,
+} from '../users/entities/user.entity';
 
 export type AuthenticatedUser = {
   id: string;
@@ -6,6 +9,8 @@ export type AuthenticatedUser = {
   email: string;
   role: UserRole;
   isActive: boolean;
+  isPinSet: boolean;
+  registrationStatus: RegistrationStatus;
 };
 
 export type RefreshRequestUser = AuthenticatedUser & {
